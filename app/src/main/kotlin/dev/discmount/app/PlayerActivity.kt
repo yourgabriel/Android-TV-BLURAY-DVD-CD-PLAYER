@@ -179,10 +179,30 @@ class PlayerActivity : Activity() {
                 if (ext.isEmpty()) fs.open(p) else CssPartFile(css, ext, fs.stat(p)!!.size)
             }
             runOnUiThread { if (css.isScrambled) showHud(I18n.t("css_decrypt"), 3000) }
-            return if (parts.size == 1) parts[0] else ConcatFile(parts)
+            val all = if (parts.size == 1) parts[0] else ConcatFile(parts)
+            return if (m != null) dvdTitle(fs, m.groupValues[1], all) else all
         }
         val parts = paths.map { fs.open(it) }
-        return if (parts.size == 1) parts[0] else ConcatFile(parts)
+        val all = if (parts.size == 1) parts[0] else ConcatFile(parts)
+        return if (m != null) dvdTitle(fs, m.groupValues[1], all) else all
+    }
+
+    /**
+     * Title VOBs often interleave several picture versions (angles / language variants). Follow the main program
+     * chain from VTS_xx_0.IFO so only one version is played; falls back to the raw VOBs if the IFO cannot be used.
+     */
+    private fun dvdTitle(fs: dev.discmount.core.DiscFileSystem, prefix: String, all: DiscFile): DiscFile {
+        return try {
+            val ifoPath = "${prefix}_0.IFO"
+            if (fs.stat(ifoPath) == null) return all
+            val plan = fs.open(ifoPath).use { dev.discmount.core.DvdIfo.plan(it, all.size) } ?: return all
+            android.util.Log.i("DiscMount", "DVD title: PGC ${plan.pgcIndex + 1}/${plan.pgcCount}, ${plan.seconds}s, ${plan.cells} cells" +
+                " (${plan.skippedCells} angle cells skipped), ${plan.ranges.size} ranges, ${plan.size} of ${all.size} bytes")
+            dev.discmount.core.DvdTitleFile(all, plan.ranges)
+        } catch (e: Exception) {
+            android.util.Log.w("DiscMount", "DVD title: IFO not usable, playing raw VOBs", e)
+            all
+        }
     }
 
     /** Blu-ray: «bd:main» = lista de reproducción principal; un .m2ts suelto también. Descifra con AACS si el disco lo usa. */
